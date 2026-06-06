@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Kefka Trines Trainer - Calibrated</title>
+<style>
+  :root{ --bg:#090909; --panel:#151515; --text:#f4f4f4; --muted:#aaa; --yellow:rgba(255,230,40,.72); --yellowStroke:rgba(255,252,140,.95); --cyan:rgba(70,235,255,.50); --purple:rgba(205,0,255,.36); --danger:rgba(255,0,70,.42); --good:#28e070; --bad:#ff4b4b; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  html,body{ margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:Arial, Helvetica, sans-serif; overscroll-behavior:none; }
+  body{ display:flex; flex-direction:column; align-items:center; }
+  #app{ width:100%; max-width:1100px; padding:10px; }
+  #hud{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; margin-bottom:8px; }
+  button, select{ font-size:16px; color:white; background:#242424; border:1px solid #666; border-radius:10px; padding:10px 12px; min-height:44px; }
+  button:active{ transform:scale(.98); }
+  #startBtn{ background:#1b5e2f; border-color:#33d06f; font-weight:bold; }
+  #againBtn{ background:#263a66; border-color:#6ea0ff; }
+  #status{ width:100%; text-align:center; min-height:24px; font-size:18px; font-weight:bold; margin:4px 0 6px; }
+  #castWrap{ width:100%; height:18px; border:1px solid #666; background:#111; border-radius:20px; overflow:hidden; margin-bottom:8px; }
+  #castBar{ height:100%; width:0%; background:linear-gradient(90deg,#33e07a,#ffe14a); transition:width .05s linear; }
+  #stageWrap{ width:100%; aspect-ratio:1320/715; border:2px solid #222; border-radius:12px; overflow:hidden; position:relative; background:#020202; }
+  svg{ width:100%; height:100%; display:block; background:#050505; touch-action:none; user-select:none; }
+  .arena-fill{ fill:#b98b25; opacity:.95; }
+  .arena-ring{ fill:none; stroke:#ffe673; stroke-width:10; }
+  .arena-pattern{ stroke:#5b4214; stroke-width:1; opacity:.25; }
+  .marker{ fill:rgba(255,255,255,.12); stroke:rgba(255,255,255,.35); stroke-width:2; }
+  .markerText{ fill:white; font-size:28px; font-weight:bold; opacity:.65; text-anchor:middle; dominant-baseline:middle; }
+  .boss-body{ fill:#28140d; stroke:#ffc783; stroke-width:4; }
+  .boss-eye{ fill:#ffd55b; }
+  .boss-hitbox{ fill:none; stroke:#e71324; stroke-width:8; opacity:.9; }
+  .boss-facing{ fill:#e71324; opacity:.9; }
+  .playerBox{ stroke:white; stroke-width:2; rx:5; }
+  .tank{ fill:#2676e8; } .healer{ fill:#2d9f4d; } .dps{ fill:#a92e32; }
+  .playerText{ fill:white; font-size:16px; font-weight:bold; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
+  .trine{ fill:var(--yellow); stroke:var(--yellowStroke); stroke-width:3; opacity:0; transition:opacity .3s linear; }
+  .trine.visible{ opacity:1; }
+  .trine.exploded{ fill:rgba(155,40,255,.48); stroke:none; opacity:.75; }
+  .cleave{ fill:var(--danger); opacity:0; pointer-events:none; transition:opacity .25s; }
+  .cleave.show{ opacity:1; }
+  .clickZone{ fill:transparent; cursor:pointer; pointer-events:none; }
+  .clickZone.active{ pointer-events:auto; }
+  .destZone{ fill:rgba(255,255,255,.05); stroke:rgba(255,255,255,.45); stroke-width:4; stroke-dasharray:10 8; opacity:0; pointer-events:none; }
+  .destZone.active{ opacity:.55; pointer-events:auto; }
+  .destZone.correct{ opacity:.85; stroke:#44ff88; fill:rgba(68,255,136,.14); stroke-dasharray:none; }
+  .mtCandidate{ fill:#e60000; stroke:white; stroke-width:3; opacity:0; pointer-events:none; }
+  .mtCandidate.show{ opacity:.95; }
+  .dragZone{ fill:rgba(255,180,40,.10); stroke:#ffdb4a; stroke-width:5; stroke-dasharray:8 7; opacity:0; pointer-events:none; }
+  .dragZone.active{ opacity:.85; pointer-events:auto; }
+  .dragZone.correct{ opacity:.95; fill:rgba(68,255,136,.16); stroke:#44ff88; stroke-dasharray:none; }
+  .safeHint{ fill:rgba(68,255,136,.18); stroke:#44ff88; stroke-width:5; opacity:.85; pointer-events:none; }
+  .resolveCircle{ fill:rgba(145,30,255,.5); opacity:0; transition:opacity .2s; pointer-events:none; stroke:rgba(190,90,255,.8); stroke-width:2; }
+  .resolveCircle.show{ opacity:1; }
+  .label{ fill:white; font-size:18px; font-weight:bold; text-anchor:middle; dominant-baseline:middle; opacity:.8; }
+  #overlay{ position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.62); font-size:42px; font-weight:bold; text-align:center; padding:20px; }
+  #overlay.good{ color:#48ff91; } #overlay.bad{ color:#ff5555; }
+  #stats{ text-align:center; color:var(--muted); font-size:14px; padding-top:6px; }
+  @media(max-width:700px){ #app{ padding:6px; } button,select{ font-size:15px; padding:8px 10px; } #status{ font-size:15px; } #overlay{ font-size:30px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <select id="roleSelect" aria-label="Role">
+      <option value="party">Party</option>
+      <option value="t1">T1 close bait</option>
+      <option value="t2">T2 far bait</option>
+    </select>
+    <button id="startBtn" type="button">Start</button>
+    <button id="againBtn" type="button">Again</button>
+  </div>
+  <div id="status">Choose role and press Start</div>
+  <div id="castWrap"><div id="castBar"></div></div>
+  <div id="stageWrap">
+    <svg id="svg" viewBox="0 0 1320 715" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <clipPath id="arenaClip"><circle cx="650" cy="329" r="340"/></clipPath>
+      </defs>
+      <rect x="0" y="0" width="1320" height="715" fill="#050505"/>
+      <g id="arenaGroup">
+        <circle class="arena-fill" cx="650" cy="329" r="340"/>
+        <g clip-path="url(#arenaClip)">
+          <path class="arena-pattern" d="M650 -20 L650 690 M310 329 L990 329 M409 88 L891 570 M891 88 L409 570 M480 34 L820 624 M820 34 L480 624"/>
+          <circle cx="650" cy="329" r="260" fill="none" stroke="#6a4c18" stroke-width="1" opacity=".28"/>
+          <circle cx="650" cy="329" r="180" fill="none" stroke="#6a4c18" stroke-width="1" opacity=".20"/>
+        </g>
+        <circle class="arena-ring" cx="650" cy="329" r="340"/>
+      </g>
+
+      <g id="markers">
+        <rect class="marker" x="440" y="124" width="48" height="48"/><text class="markerText" x="464" y="148">1</text>
+        <rect class="marker" x="803" y="124" width="48" height="48"/><text class="markerText" x="827" y="148">2</text>
+        <rect class="marker" x="803" y="533" width="48" height="48"/><text class="markerText" x="827" y="557">3</text>
+        <rect class="marker" x="440" y="533" width="48" height="48"/><text class="markerText" x="464" y="557">4</text>
+      </g>
+
+      <g id="trines">
+        <polygon id="tri_L_NW" class="trine" points="549,150 402,80 401,229"/>
+        <polygon id="tri_L_W" class="trine" points="487,407 344,326 342,492"/>
+        <polygon id="tri_L_SW" class="trine" points="651,503 511,578 648,666"/>
+        <polygon id="tri_R_NE" class="trine" points="650,0 789,64 654,148"/>
+        <polygon id="tri_R_E" class="trine" points="804,237 940,169 938,330"/>
+        <polygon id="tri_R_SE" class="trine" points="805,575 806,415 941,495"/>
+        <polygon id="tri_CENTER" class="trine" points="603,241 745,335 596,418"/>
+      </g>
+
+      <g id="resolveCircles"></g>
+
+      <rect id="leftCleave" class="cleave" x="310" y="-20" width="340" height="740" clip-path="url(#arenaClip)"/>
+      <rect id="rightCleave" class="cleave" x="650" y="-20" width="340" height="740" clip-path="url(#arenaClip)"/>
+
+      <g id="boss">
+        <circle class="boss-hitbox" cx="650" cy="329" r="92"/>
+        <polygon class="boss-facing" points="650,222 632,252 668,252"/>
+        <circle class="boss-body" cx="650" cy="329" r="36"/>
+        <ellipse class="boss-eye" cx="650" cy="329" rx="24" ry="14"/>
+        <circle fill="#1c0f08" cx="650" cy="329" r="10"/>
+      </g>
+
+      <g id="players"></g>
+
+      <rect id="tapLeft" class="clickZone" x="310" y="0" width="340" height="715"/>
+      <rect id="tapRight" class="clickZone" x="650" y="0" width="340" height="715"/>
+
+      <circle id="destParty" class="destZone" cx="0" cy="0" r="70"/>
+      <circle id="destT1" class="destZone" cx="0" cy="0" r="55"/>
+      <circle id="destT2" class="destZone" cx="0" cy="0" r="70"/>
+      <circle id="dragBossZone" class="dragZone" cx="0" cy="0" r="60"/>
+      <g id="mtCandidates"></g>
+      <text id="destLabel" class="label" x="650" y="690"></text>
+    </svg>
+    <div id="overlay"></div>
+  </div>
+  <div id="stats">Attempts: <span id="attempts">0</span> | Success: <span id="successes">0</span> | Streak: <span id="streak">0</span></div>
+</div>
+<script>
+(() => {
+  const TRI = {
+    L_NW:[[549,150],[402,80],[401,229]],
+    L_W:[[487,407],[344,326],[342,492]],
+    L_SW:[[651,503],[511,578],[648,666]],
+    R_NE:[[650,0],[789,64],[654,148]],
+    R_E:[[804,237],[940,169],[938,330]],
+    R_SE:[[805,575],[806,415],[941,495]],
+    CENTER:[[603,241],[745,335],[596,418]]
+  };
+  const OUTER = ['L_NW','L_W','L_SW','R_NE','R_E','R_SE'];
+  const ADJACENT_PAIRS = [
+    ['L_NW','L_W'], ['L_W','L_SW'],
+    ['R_NE','R_E'], ['R_E','R_SE']
+  ];
+  // Calibrated safespots from user coordinates.
+  // Party is based on the adjacent pair in wave 1.
+  // T2 is based on the separated/extra trine in wave 1.
+  // T1 is picked from the three calibrated MT bait pockets, choosing the one closest to the party spot.
+  const PARTY_SPOTS = {
+    L_NW_L_W:[396,278],
+    L_W_L_SW:[479,512],
+    R_NE_R_E:[805,118],
+    R_E_R_SE:[906,337]
+  };
+  const T1_SPOTS = {
+    t1_top:[748,198],
+    t1_left:[545,335],
+    t1_bottom:[716,468]
+  };
+  const MT_BAIT_SPOTS = Object.values(T1_SPOTS);
+  const T2_SPOTS = {
+    L_NW:[415,108],
+    L_W:[348,438],
+    L_SW:[561,635],
+    R_NE:[706,15],
+    R_E:[956,239],
+    R_SE:[872,561]
+  };
+  function pairKey(pair){ return pair.join('_'); }
+  function chooseMTBaitSpot(partyPoint){
+    return MT_BAIT_SPOTS
+      .map(p => ({ p, score: Math.hypot(p[0]-partyPoint[0], p[1]-partyPoint[1]) }))
+      .sort((a,b)=>a.score-b.score)[0].p.slice();
+  }
+
+  const status = document.getElementById('status');
+  const castBar = document.getElementById('castBar');
+  const overlay = document.getElementById('overlay');
+  const roleSelect = document.getElementById('roleSelect');
+  const tapLeft = document.getElementById('tapLeft');
+  const tapRight = document.getElementById('tapRight');
+  const destParty = document.getElementById('destParty');
+  const destT1 = document.getElementById('destT1');
+  const destT2 = document.getElementById('destT2');
+  const dragBossZone = document.getElementById('dragBossZone');
+  const destLabel = document.getElementById('destLabel');
+  const playersG = document.getElementById('players');
+  const resolveG = document.getElementById('resolveCircles');
+  const mtCandidatesG = document.getElementById('mtCandidates');
+  const leftCleave = document.getElementById('leftCleave');
+  const rightCleave = document.getElementById('rightCleave');
+  let state = 'idle', timer = null, raf = null, game = null;
+  let attempts=0, successes=0, streak=0;
+
+  function rnd(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function setStatus(t){ status.textContent = t; }
+  function clearTimers(){ if(timer) clearTimeout(timer); timer=null; if(raf) cancelAnimationFrame(raf); raf=null; }
+  function updateStats(){ document.getElementById('attempts').textContent=attempts; document.getElementById('successes').textContent=successes; document.getElementById('streak').textContent=streak; }
+  function trineEl(k){ return document.getElementById('tri_'+k); }
+  function hideAllTrines(){ Object.keys(TRI).forEach(k=>{ const e=trineEl(k); e.classList.remove('visible','exploded'); }); }
+  function showTrines(keys){ keys.forEach(k => trineEl(k).classList.add('visible')); }
+  function hideTrines(keys){ keys.forEach(k => trineEl(k).classList.remove('visible')); }
+  function clearResolve(){ resolveG.innerHTML=''; Object.keys(TRI).forEach(k=>trineEl(k).classList.remove('exploded')); }
+  function setResolve(keys){
+    // Only the current resolving wave is shown. Previous AoEs disappear.
+    clearResolve();
+    keys.forEach(k=>{
+      TRI[k].forEach(([x,y])=>{
+        const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+        c.setAttribute('class','resolveCircle show');
+        c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r',95);
+        resolveG.appendChild(c);
+      });
+      trineEl(k).classList.add('exploded');
+    });
+  }
+  function resetCleave(){ leftCleave.classList.remove('show'); rightCleave.classList.remove('show'); }
+  function showCleave(side){ (side==='left'?leftCleave:rightCleave).classList.add('show'); }
+  function startCast(ms,onEnd){ clearTimers(); castBar.style.width='0%'; const t0=performance.now(); const tick=now=>{ const p=Math.min(1,(now-t0)/ms); castBar.style.width=(p*100).toFixed(1)+'%'; if(p<1) raf=requestAnimationFrame(tick); }; raf=requestAnimationFrame(tick); timer=setTimeout(()=>{ clearTimers(); castBar.style.width='100%'; onEnd(); },ms); }
+  function stopCast(){ clearTimers(); castBar.style.width='100%'; }
+  function enableWingTap(on){ tapLeft.classList.toggle('active',on); tapRight.classList.toggle('active',on); }
+  function enableDest(on){ [destParty,destT1,destT2].forEach(e=>e.classList.toggle('active',on)); if(!on){ [destParty,destT1,destT2].forEach(e=>e.classList.remove('active')); destLabel.textContent=''; } }
+  function enableDrag(on){ dragBossZone.classList.toggle('active',on); }
+  function clearMTCandidates(){ mtCandidatesG.innerHTML=''; }
+  function showMTCandidates(){
+    clearMTCandidates();
+    MT_BAIT_SPOTS.forEach(([x,y])=>{
+      const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('class','mtCandidate show'); c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r',12);
+      mtCandidatesG.appendChild(c);
+    });
+  }
+  function clearHints(){ document.querySelectorAll('.safeHint').forEach(e=>e.remove()); clearMTCandidates(); [destParty,destT1,destT2].forEach(e=>e.classList.remove('correct')); dragBossZone.classList.remove('active','correct'); }
+  function showSafeSideHint(){ const r=document.createElementNS('http://www.w3.org/2000/svg','rect'); r.setAttribute('class','safeHint'); r.setAttribute('clip-path','url(#arenaClip)'); r.setAttribute('x',game.safeSide==='left'?310:650); r.setAttribute('y',-20); r.setAttribute('width',340); r.setAttribute('height',740); document.getElementById('arenaGroup').appendChild(r); }
+  function showCorrectDestHint(){ showDestinationZones(); enableDest(false); [destParty,destT1,destT2].forEach(e=>e.classList.add('correct')); const role=roleSelect.value; (role==='party'?destParty:role==='t1'?destT1:destT2).classList.add('correct'); }
+  function showDragHint(){ dragBossZone.setAttribute('cx',game.targets.bossAfter[0]); dragBossZone.setAttribute('cy',game.targets.bossAfter[1]); dragBossZone.classList.add('correct'); }
+  function showOverlay(text,good){ overlay.style.display='flex'; overlay.className=good?'good':'bad'; overlay.innerHTML=text; }
+  function hideOverlay(){ overlay.style.display='none'; overlay.className=''; overlay.innerHTML=''; }
+
+  function makePlayer(id,x,y,cls){
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('id','p_'+id); g.setAttribute('transform',`translate(${x},${y})`);
+    const r=document.createElementNS('http://www.w3.org/2000/svg','rect'); r.setAttribute('class','playerBox '+cls); r.setAttribute('x',-16); r.setAttribute('y',-13); r.setAttribute('width',32); r.setAttribute('height',26); r.setAttribute('rx',5);
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('class','playerText'); t.setAttribute('x',0); t.setAttribute('y',1); t.textContent=id;
+    g.appendChild(r); g.appendChild(t); playersG.appendChild(g);
+  }
+  function resetPlayers(){
+    playersG.innerHTML='';
+    makePlayer('T1',620,360,'tank'); makePlayer('T2',584,360,'tank');
+    makePlayer('H1',638,385,'healer'); makePlayer('H2',675,385,'healer');
+    makePlayer('M1',620,412,'dps'); makePlayer('M2',657,412,'dps');
+    makePlayer('R1',695,360,'dps'); makePlayer('R2',732,360,'dps');
+  }
+  function movePlayer(id,x,y){ const e=document.getElementById('p_'+id); if(e) e.setAttribute('transform',`translate(${x},${y})`); }
+  function moveBoss(cx,cy){
+    document.querySelector('#boss .boss-hitbox').setAttribute('cx',cx);
+    document.querySelector('#boss .boss-hitbox').setAttribute('cy',cy);
+    document.querySelector('#boss .boss-body').setAttribute('cx',cx);
+    document.querySelector('#boss .boss-body').setAttribute('cy',cy);
+    document.querySelector('#boss .boss-eye').setAttribute('cx',cx);
+    document.querySelector('#boss .boss-eye').setAttribute('cy',cy);
+    document.querySelector('#boss circle[fill="#1c0f08"]').setAttribute('cx',cx);
+    document.querySelector('#boss circle[fill="#1c0f08"]').setAttribute('cy',cy);
+    document.querySelector('#boss .boss-facing').setAttribute('points',`${cx},${cy-107} ${cx-18},${cy-77} ${cx+18},${cy-77}`);
+  }
+  function autoMoveSafeSide(side){
+    const x = side==='left'?600:700;
+    ['T1','T2','H1','H2','M1','M2','R1','R2'].forEach((id,i)=>{
+      const row = Math.floor(i/4), col=i%4; movePlayer(id,x + (col-1.5)*28, 370 + row*28);
+    });
+  }
+  function placeFinal(){
+    const pp=game.targets.party, tt1=game.targets.t1, tt2=game.targets.t2;
+    movePlayer('T1',tt1[0],tt1[1]);
+    movePlayer('T2',tt2[0],tt2[1]);
+    const partyIds=['H1','H2','M1','M2','R1','R2'];
+    partyIds.forEach((id,i)=>movePlayer(id, pp[0]+(i%3-1)*28, pp[1]+Math.floor(i/3)*28));
+  }
+  function newGameData(){
+    const pair = rnd(ADJACENT_PAIRS);
+    const extraChoices = OUTER.filter(k=>!pair.includes(k));
+    const extra = rnd(extraChoices);
+    const wave1 = [...pair, extra];
+    const remaining = OUTER.filter(k=>!wave1.includes(k));
+    const wave2 = rnd(remaining);
+    const wave3 = remaining.filter(k=>k!==wave2).concat(['CENTER']);
+    const safeSide = Math.random()<0.5 ? 'left' : 'right';
+    const cleaveSide = safeSide==='left'?'right':'left';
+    const pc = PARTY_SPOTS[pairKey(pair)].slice();
+    const sc = T2_SPOTS[extra].slice();
+    const center = [650,329];
+    // Drag boss immediately toward the calibrated party pocket between the two close first-wave trines.
+    const dx = pc[0]-center[0], dy = pc[1]-center[1];
+    const len = Math.max(1, Math.hypot(dx,dy));
+    const bossAfter = [center[0] + dx/len*92, center[1] + dy/len*92];
+    const t1Spot = chooseMTBaitSpot(pc);
+    const targets = {
+      party: pc,                                      // calibrated pocket between the two close triangles
+      t1: t1Spot,                                     // closest calibrated MT bait pocket
+      t2: sc,                                         // calibrated far bait for separated first-wave triangle
+      bossAfter
+    };
+    return {pair, extra, wave1, wave2, wave3, safeSide, cleaveSide, targets, dragged:false, sideChosen:false};
+  }
+  function resetRound(){
+    clearTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Choose role and press Start');
+    [destParty,destT1,destT2,dragBossZone].forEach(e=>{ e.setAttribute('cx',0); e.setAttribute('cy',0); });
+  }
+  function startRound(){
+    resetRound(); attempts++; updateStats(); game = newGameData(); state='wave1'; hideOverlay(); setStatus('Wave 1: read the first trines'); showTrines(game.wave1);
+    startCast(6000, phaseWing);
+  }
+  function phaseWing(){
+    state='wing'; showTrines([game.wave2]); showCleave(game.cleaveSide); setStatus('Wing + wave 2: tap the safe side'); enableWingTap(true);
+    startCast(6000, ()=>{
+      if(state==='wing') die('Too slow');
+      else if(state==='drag') die('Boss was not dragged');
+      else phaseThird();
+    });
+  }
+  function chooseSide(side){
+    if(state!=='wing') return;
+    if(side!==game.safeSide){ die('Wrong cleave side'); return; }
+    game.sideChosen = true;
+    enableWingTap(false);
+    autoMoveSafeSide(game.safeSide);
+    if(roleSelect.value==='t1'){
+      state='drag';
+      dragBossZone.setAttribute('cx',game.targets.bossAfter[0]);
+      dragBossZone.setAttribute('cy',game.targets.bossAfter[1]);
+      enableDrag(true);
+      setStatus('T1: tap where to drag the boss');
+    }else{
+      game.dragged = true;
+      moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
+      state='waitingThird';
+      setStatus('Boss dragged. Wait for third wave + cleave.');
+    }
+  }
+  function chooseDrag(){
+    if(state!=='drag') return;
+    game.dragged = true;
+    enableDrag(false);
+    moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
+    state='waitingThird';
+    setStatus('Boss dragged. Wait for third wave + cleave.');
+  }
+  function phaseThird(){
+    if(state==='dead') return;
+    state='third';
+    enableWingTap(false); enableDrag(false);
+    showTrines(game.wave3);
+    setStatus('Third wave + wing cleave');
+    startCast(6000, phaseWave1Pop);
+  }
+  function phaseWave1Pop(){
+    if(state==='dead') return;
+    state='move';
+    resetCleave();
+    hideTrines(game.wave1);
+    setResolve(game.wave1);
+    setStatus('Wave 1 popped: tap your final safe spot');
+    showDestinationZones();
+    startCast(6000, ()=>die('Too slow'));
+  }
+  function showDestinationZones(){
+    showMTCandidates();
+    destParty.setAttribute('cx',game.targets.party[0]); destParty.setAttribute('cy',game.targets.party[1]);
+    destT1.setAttribute('cx',game.targets.t1[0]); destT1.setAttribute('cy',game.targets.t1[1]);
+    destT2.setAttribute('cx',game.targets.t2[0]); destT2.setAttribute('cy',game.targets.t2[1]);
+    enableDest(true);
+    const role = roleSelect.value;
+    destLabel.textContent = role==='party'?'Tap PARTY safe spot':role==='t1'?'Tap T1 close bait':'Tap T2 far bait';
+  }
+  function chooseDest(dest){
+    if(state!=='move') return;
+    const role=roleSelect.value;
+    if(dest!==role){ die('Wrong final position'); return; }
+    stopCast(); enableDest(false); placeFinal(); resolveAfterMove();
+  }
+  function resolveAfterMove(){
+    state='resolved';
+    setStatus('Wave 2 resolves');
+    setTimeout(()=>{
+      hideTrines([game.wave2]);
+      setResolve([game.wave2]);
+    },450);
+    setTimeout(()=>{
+      setStatus('Wave 3 resolves — final safe spots shown');
+      hideTrines(game.wave3);
+      setResolve(game.wave3);
+      showDestinationZones();
+      enableDest(false);
+      [destParty,destT1,destT2].forEach(e=>e.classList.add('correct'));
+    },1250);
+    setTimeout(()=>{ successes++; streak++; updateStats(); showOverlay('SUCCESS',true); },2100);
+  }
+  function die(reason){
+    if(state==='dead') return;
+    const diedState = state;
+    state='dead'; stopCast(); enableWingTap(false); enableDest(false); enableDrag(false); streak=0; updateStats(); setStatus(reason);
+    if(game){
+      if(diedState==='wing') showSafeSideHint();
+      if(diedState==='drag') showDragHint();
+      if(diedState==='move' || diedState==='resolved'){ showCorrectDestHint(); placeFinal(); }
+    }
+    showOverlay('DEAD<br><span style="font-size:22px">'+reason+'<br>Correct spot is shown in green.</span>',false);
+  }
+
+  tapLeft.addEventListener('pointerdown', e=>{ e.preventDefault(); chooseSide('left'); });
+  tapRight.addEventListener('pointerdown', e=>{ e.preventDefault(); chooseSide('right'); });
+  destParty.addEventListener('pointerdown', e=>{ e.preventDefault(); chooseDest('party'); });
+  destT1.addEventListener('pointerdown', e=>{ e.preventDefault(); chooseDest('t1'); });
+  destT2.addEventListener('pointerdown', e=>{ e.preventDefault(); chooseDest('t2'); });
+  dragBossZone.addEventListener('pointerdown', e=>{ e.preventDefault(); chooseDrag(); });
+  document.getElementById('startBtn').addEventListener('click', startRound);
+  document.getElementById('startBtn').addEventListener('touchend', e=>{ e.preventDefault(); startRound(); }, {passive:false});
+  document.getElementById('againBtn').addEventListener('click', startRound);
+  document.getElementById('againBtn').addEventListener('touchend', e=>{ e.preventDefault(); startRound(); }, {passive:false});
+  resetRound(); updateStats();
+})();
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Kefka Trines Trainer - Calibrated</title>
+<title>Kefka Trines Trainer - v6 falling timing</title>
 <style>
   :root{ --bg:#090909; --panel:#151515; --text:#f4f4f4; --muted:#aaa; --yellow:rgba(255,230,40,.72); --yellowStroke:rgba(255,252,140,.95); --cyan:rgba(70,235,255,.50); --purple:rgba(205,0,255,.36); --danger:rgba(255,0,70,.42); --good:#28e070; --bad:#ff4b4b; }
   *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -32,11 +32,15 @@
   .playerBox{ stroke:white; stroke-width:2; rx:5; }
   .tank{ fill:#2676e8; } .healer{ fill:#2d9f4d; } .dps{ fill:#a92e32; }
   .playerText{ fill:white; font-size:16px; font-weight:bold; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
-  .trine{ fill:var(--yellow); stroke:var(--yellowStroke); stroke-width:3; opacity:0; transition:opacity .3s linear; }
+  .trine{ fill:var(--yellow); stroke:var(--yellowStroke); stroke-width:3; opacity:0; transition:opacity .12s linear; }
   .trine.visible{ opacity:1; }
+  .trine.falling{ opacity:1; }
   .trine.exploded{ fill:rgba(155,40,255,.48); stroke:none; opacity:.75; }
-  .cleave{ fill:var(--danger); opacity:0; pointer-events:none; transition:opacity .25s; }
+  .cleave{ fill:var(--danger); opacity:0; pointer-events:none; transition:opacity .18s; }
   .cleave.show{ opacity:1; }
+  .wingGlow{ fill:rgba(255,85,255,.50); stroke:rgba(255,205,255,.95); stroke-width:5; opacity:0; pointer-events:none; filter:drop-shadow(0 0 12px rgba(255,80,255,.9)); transition:opacity .2s; }
+  .wingGlow.show{ opacity:1; animation:wingPulse .65s ease-in-out infinite alternate; }
+  @keyframes wingPulse{ from{ opacity:.35; } to{ opacity:.9; } }
   .clickZone{ fill:transparent; cursor:pointer; pointer-events:none; }
   .clickZone.active{ pointer-events:auto; }
   .destZone{ fill:rgba(255,255,255,.05); stroke:rgba(255,255,255,.45); stroke-width:4; stroke-dasharray:10 8; opacity:0; pointer-events:none; }
@@ -68,7 +72,7 @@
     <button id="startBtn" type="button">Start</button>
     <button id="againBtn" type="button">Again</button>
   </div>
-  <div id="status">Choose role and press Start</div>
+  <div id="status">Choose role and press Start — v6 falling timing</div>
   <div id="castWrap"><div id="castBar"></div></div>
   <div id="stageWrap">
     <svg id="svg" viewBox="0 0 1320 715" preserveAspectRatio="xMidYMid meet">
@@ -108,6 +112,9 @@
       <rect id="leftCleave" class="cleave" x="310" y="-20" width="340" height="740" clip-path="url(#arenaClip)"/>
       <rect id="rightCleave" class="cleave" x="650" y="-20" width="340" height="740" clip-path="url(#arenaClip)"/>
 
+
+      <path id="leftWingGlow" class="wingGlow" d="M650 329 C585 230 500 215 454 279 C526 287 558 344 650 329 Z"/>
+      <path id="rightWingGlow" class="wingGlow" d="M650 329 C715 230 800 215 846 279 C774 287 742 344 650 329 Z"/>
       <g id="boss">
         <circle class="boss-hitbox" cx="650" cy="329" r="92"/>
         <polygon class="boss-facing" points="650,222 632,252 668,252"/>
@@ -143,15 +150,13 @@
     R_SE:[[805,575],[806,415],[941,495]],
     CENTER:[[603,241],[745,335],[596,418]]
   };
+
   const OUTER = ['L_NW','L_W','L_SW','R_NE','R_E','R_SE'];
   const ADJACENT_PAIRS = [
     ['L_NW','L_W'], ['L_W','L_SW'],
     ['R_NE','R_E'], ['R_E','R_SE']
   ];
-  // Calibrated safespots from user coordinates.
-  // Party is based on the adjacent pair in wave 1.
-  // T2 is based on the separated/extra trine in wave 1.
-  // T1 is picked from the three calibrated MT bait pockets, choosing the one closest to the party spot.
+
   const PARTY_SPOTS = {
     L_NW_L_W:[396,278],
     L_W_L_SW:[479,512],
@@ -172,6 +177,23 @@
     R_E:[956,239],
     R_SE:[872,561]
   };
+
+  // Main timing model, in milliseconds.
+  // Wave 1 falls at 0s and lands at 2s. It pops 8s after landing = 10s total.
+  // Wave 2 falls at 2s and lands at 4s. It pops at 12s total.
+  // Wave 3 falls at 4s and lands at 6s. It pops at 14s total.
+  const TIMING = {
+    FALL: 2000,
+    WAVE2_START: 2000,
+    WAVE3_START: 4000,
+    WING_START: 1000,
+    WING_CAST: 4000,
+    WING_RESOLVE: 5000,
+    WAVE1_POP: 10000,
+    WAVE2_POP: 12000,
+    WAVE3_POP: 14000
+  };
+
   function pairKey(pair){ return pair.join('_'); }
   function chooseMTBaitSpot(partyPoint){
     return MT_BAIT_SPOTS
@@ -195,38 +217,132 @@
   const mtCandidatesG = document.getElementById('mtCandidates');
   const leftCleave = document.getElementById('leftCleave');
   const rightCleave = document.getElementById('rightCleave');
-  let state = 'idle', timer = null, raf = null, game = null;
+  const leftWingGlow = document.getElementById('leftWingGlow');
+  const rightWingGlow = document.getElementById('rightWingGlow');
+
+  let state = 'idle', castTimer = null, castRaf = null, game = null;
+  let scheduled = [];
+  let fallRafs = [];
   let attempts=0, successes=0, streak=0;
 
   function rnd(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
   function setStatus(t){ status.textContent = t; }
-  function clearTimers(){ if(timer) clearTimeout(timer); timer=null; if(raf) cancelAnimationFrame(raf); raf=null; }
+  function delay(fn,ms){
+    const id = setTimeout(()=>{
+      scheduled = scheduled.filter(x=>x!==id);
+      fn();
+    }, ms);
+    scheduled.push(id);
+    return id;
+  }
+  function clearScheduled(){ scheduled.forEach(clearTimeout); scheduled=[]; }
+  function clearCast(){ if(castTimer) clearTimeout(castTimer); castTimer=null; if(castRaf) cancelAnimationFrame(castRaf); castRaf=null; }
+  function clearAllTimers(){ clearCast(); clearScheduled(); fallRafs.forEach(cancelAnimationFrame); fallRafs=[]; }
   function updateStats(){ document.getElementById('attempts').textContent=attempts; document.getElementById('successes').textContent=successes; document.getElementById('streak').textContent=streak; }
   function trineEl(k){ return document.getElementById('tri_'+k); }
-  function hideAllTrines(){ Object.keys(TRI).forEach(k=>{ const e=trineEl(k); e.classList.remove('visible','exploded'); }); }
-  function showTrines(keys){ keys.forEach(k => trineEl(k).classList.add('visible')); }
-  function hideTrines(keys){ keys.forEach(k => trineEl(k).classList.remove('visible')); }
+
+  function formatPoints(points){ return points.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' '); }
+  function centroid(points){ return [points.reduce((a,p)=>a+p[0],0)/points.length, points.reduce((a,p)=>a+p[1],0)/points.length]; }
+  function transformedPoints(points, progress){
+    // Robust SVG animation for Safari/iPhone: directly updates polygon vertices instead of relying on CSS transform on <polygon>.
+    const ease = 1 - Math.pow(1-progress, 3);
+    const [cx,cy] = centroid(points);
+    const angle = (-190 * (1-ease)) * Math.PI / 180;
+    const scale = 0.68 + (0.32 * ease);
+    const yOffset = -430 * (1-ease);
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    return points.map(([x,y])=>{
+      const dx=(x-cx)*scale, dy=(y-cy)*scale;
+      return [cx + dx*cos - dy*sin, cy + dx*sin + dy*cos + yOffset];
+    });
+  }
+  function restoreTrinePoints(k){ trineEl(k).setAttribute('points', formatPoints(TRI[k])); }
+  function hideAllTrines(){
+    Object.keys(TRI).forEach(k=>{
+      const e=trineEl(k);
+      e.classList.remove('visible','falling','exploded');
+      e.style.opacity='';
+      restoreTrinePoints(k);
+    });
+  }
+  function fallTrines(keys){
+    const start = performance.now();
+    keys.forEach(k=>{
+      const e=trineEl(k);
+      e.classList.remove('visible','exploded');
+      e.classList.add('falling');
+      e.style.opacity='0';
+      e.setAttribute('points', formatPoints(transformedPoints(TRI[k], 0)));
+    });
+    const tick = now => {
+      if(state==='dead') return;
+      const progress = Math.min(1, (now-start)/TIMING.FALL);
+      keys.forEach(k=>{
+        const e=trineEl(k);
+        e.style.opacity = progress < 0.08 ? String(progress/0.08) : '1';
+        e.setAttribute('points', formatPoints(transformedPoints(TRI[k], progress)));
+      });
+      if(progress < 1){
+        const id = requestAnimationFrame(tick);
+        fallRafs.push(id);
+      }else{
+        keys.forEach(k=>{
+          const e=trineEl(k);
+          restoreTrinePoints(k);
+          e.classList.remove('falling');
+          e.classList.add('visible');
+          e.style.opacity='';
+        });
+      }
+    };
+    const id = requestAnimationFrame(tick);
+    fallRafs.push(id);
+  }
+  function hideTrines(keys){ keys.forEach(k => { const e=trineEl(k); e.classList.remove('visible','falling'); e.style.opacity=''; restoreTrinePoints(k); }); }
+
   function clearResolve(){ resolveG.innerHTML=''; Object.keys(TRI).forEach(k=>trineEl(k).classList.remove('exploded')); }
-  function setResolve(keys){
-    // Only the current resolving wave is shown. Previous AoEs disappear.
-    clearResolve();
+  function addResolve(keys, mode='normal'){
     keys.forEach(k=>{
       TRI[k].forEach(([x,y])=>{
         const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
-        c.setAttribute('class','resolveCircle show');
         c.setAttribute('cx',x); c.setAttribute('cy',y); c.setAttribute('r',95);
+        c.style.pointerEvents='none';
+        if(mode==='light'){
+          c.style.fill='rgba(170,120,255,0.22)';
+          c.style.stroke='rgba(200,160,255,0.35)';
+        }else{
+          c.style.fill='rgba(145,30,255,.50)';
+          c.style.stroke='rgba(190,90,255,.80)';
+        }
+        c.style.strokeWidth='2';
         resolveG.appendChild(c);
       });
       trineEl(k).classList.add('exploded');
     });
   }
+  function setResolve(keys){ clearResolve(); addResolve(keys,'normal'); }
+
   function resetCleave(){ leftCleave.classList.remove('show'); rightCleave.classList.remove('show'); }
   function showCleave(side){ (side==='left'?leftCleave:rightCleave).classList.add('show'); }
-  function startCast(ms,onEnd){ clearTimers(); castBar.style.width='0%'; const t0=performance.now(); const tick=now=>{ const p=Math.min(1,(now-t0)/ms); castBar.style.width=(p*100).toFixed(1)+'%'; if(p<1) raf=requestAnimationFrame(tick); }; raf=requestAnimationFrame(tick); timer=setTimeout(()=>{ clearTimers(); castBar.style.width='100%'; onEnd(); },ms); }
-  function stopCast(){ clearTimers(); castBar.style.width='100%'; }
+  function resetWingGlow(){ leftWingGlow.classList.remove('show'); rightWingGlow.classList.remove('show'); }
+  function showWingGlow(side){ (side==='left'?leftWingGlow:rightWingGlow).classList.add('show'); }
+
+  function startCast(ms,onEnd){
+    clearCast(); castBar.style.width='0%';
+    const t0=performance.now();
+    const tick=now=>{
+      const p=Math.min(1,(now-t0)/ms);
+      castBar.style.width=(p*100).toFixed(1)+'%';
+      if(p<1) castRaf=requestAnimationFrame(tick);
+    };
+    castRaf=requestAnimationFrame(tick);
+    castTimer=setTimeout(()=>{ clearCast(); castBar.style.width='100%'; onEnd && onEnd(); },ms);
+  }
+  function stopCast(){ clearCast(); castBar.style.width='100%'; }
   function enableWingTap(on){ tapLeft.classList.toggle('active',on); tapRight.classList.toggle('active',on); }
   function enableDest(on){ [destParty,destT1,destT2].forEach(e=>e.classList.toggle('active',on)); if(!on){ [destParty,destT1,destT2].forEach(e=>e.classList.remove('active')); destLabel.textContent=''; } }
   function enableDrag(on){ dragBossZone.classList.toggle('active',on); }
+
   function clearMTCandidates(){ mtCandidatesG.innerHTML=''; }
   function showMTCandidates(){
     clearMTCandidates();
@@ -281,6 +397,7 @@
     const partyIds=['H1','H2','M1','M2','R1','R2'];
     partyIds.forEach((id,i)=>movePlayer(id, pp[0]+(i%3-1)*28, pp[1]+Math.floor(i/3)*28));
   }
+
   function newGameData(){
     const pair = rnd(ADJACENT_PAIRS);
     const extraChoices = OUTER.filter(k=>!pair.includes(k));
@@ -294,80 +411,100 @@
     const pc = PARTY_SPOTS[pairKey(pair)].slice();
     const sc = T2_SPOTS[extra].slice();
     const center = [650,329];
-    // Drag boss immediately toward the calibrated party pocket between the two close first-wave trines.
     const dx = pc[0]-center[0], dy = pc[1]-center[1];
     const len = Math.max(1, Math.hypot(dx,dy));
     const bossAfter = [center[0] + dx/len*92, center[1] + dy/len*92];
     const t1Spot = chooseMTBaitSpot(pc);
-    const targets = {
-      party: pc,                                      // calibrated pocket between the two close triangles
-      t1: t1Spot,                                     // closest calibrated MT bait pocket
-      t2: sc,                                         // calibrated far bait for separated first-wave triangle
-      bossAfter
-    };
-    return {pair, extra, wave1, wave2, wave3, safeSide, cleaveSide, targets, dragged:false, sideChosen:false};
+    const targets = { party: pc, t1: t1Spot, t2: sc, bossAfter };
+    return {pair, extra, wave1, wave2, wave3, safeSide, cleaveSide, targets, dragged:false, sideChosen:false, moved:false};
   }
+
   function resetRound(){
-    clearTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Choose role and press Start');
+    clearAllTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); resetWingGlow(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Choose role and press Start');
     [destParty,destT1,destT2,dragBossZone].forEach(e=>{ e.setAttribute('cx',0); e.setAttribute('cy',0); });
   }
+
   function startRound(){
-    resetRound(); attempts++; updateStats(); game = newGameData(); state='wave1'; hideOverlay(); setStatus('Wave 1: read the first trines'); showTrines(game.wave1);
-    startCast(6000, phaseWing);
+    resetRound(); attempts++; updateStats(); game = newGameData(); hideOverlay();
+    state='wave1';
+    setStatus('Wave 1 falling (lands in 2s)');
+    fallTrines(game.wave1);
+
+    delay(startWingCast, TIMING.WING_START);
+    delay(()=>{ if(state!=='dead'){ setStatus('Wave 2 falling (lands in 2s)'); fallTrines([game.wave2]); } }, TIMING.WAVE2_START);
+    delay(()=>{ if(state!=='dead'){ setStatus('Wave 3 falling (lands in 2s)'); fallTrines(game.wave3); } }, TIMING.WAVE3_START);
+    delay(resolveWingCleave, TIMING.WING_RESOLVE);
+    delay(phaseWave1Pop, TIMING.WAVE1_POP);
+    delay(phaseWave2Pop, TIMING.WAVE2_POP);
+    delay(phaseWave3Pop, TIMING.WAVE3_POP);
   }
-  function phaseWing(){
-    state='wing'; showTrines([game.wave2]); showCleave(game.cleaveSide); setStatus('Wing + wave 2: tap the safe side'); enableWingTap(true);
-    startCast(1500, ()=>{
-      if(state==='wing') die('Too slow');
-      else if(state==='drag') die('Boss was not dragged');
-      else phaseThird();
-    });
+
+  function startWingCast(){
+    if(state==='dead') return;
+    state='wing';
+    setStatus('Wing glow: tap safe side before cleave');
+    showWingGlow(game.cleaveSide);
+    enableWingTap(true);
+    startCast(TIMING.WING_CAST, ()=>{});
   }
+
   function chooseSide(side){
     if(state!=='wing') return;
     if(side!==game.safeSide){ die('Wrong cleave side'); return; }
     game.sideChosen = true;
     enableWingTap(false);
     autoMoveSafeSide(game.safeSide);
+    setStatus('Safe side chosen');
+  }
+
+  function resolveWingCleave(){
+    if(state==='dead') return;
+    stopCast();
+    enableWingTap(false);
+    resetWingGlow();
+
+    if(!game.sideChosen){ die('Too slow'); return; }
+
+    showCleave(game.cleaveSide);
+    delay(()=>resetCleave(), 320);
+
     if(roleSelect.value==='t1'){
       state='drag';
       dragBossZone.setAttribute('cx',game.targets.bossAfter[0]);
       dragBossZone.setAttribute('cy',game.targets.bossAfter[1]);
       enableDrag(true);
-      setStatus('T1: tap where to drag the boss');
+      setStatus('T1: drag boss before first pop');
+      startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
     }else{
       game.dragged = true;
       moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
-      state='waitingThird';
-      setStatus('Boss dragged. Wait for third wave + cleave.');
+      state='waitingFirstPop';
+      setStatus('Boss dragged. First wave pops in 5s.');
+      startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
     }
   }
+
   function chooseDrag(){
     if(state!=='drag') return;
     game.dragged = true;
     enableDrag(false);
     moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
-    state='waitingThird';
-    setStatus('Boss dragged. Wait for third wave + cleave.');
+    state='waitingFirstPop';
+    setStatus('Boss dragged. First wave pops in 5s.');
   }
-  function phaseThird(){
-    if(state==='dead') return;
-    state='third';
-    enableWingTap(false); enableDrag(false);
-    showTrines(game.wave3);
-    setStatus('Third wave + wing cleave');
-    startCast(1500, phaseWave1Pop);
-  }
+
   function phaseWave1Pop(){
     if(state==='dead') return;
+    if(roleSelect.value==='t1' && !game.dragged){ die('Boss was not dragged'); return; }
     state='move';
-    resetCleave();
+    resetCleave(); resetWingGlow();
     hideTrines(game.wave1);
     setResolve(game.wave1);
     setStatus('Wave 1 popped: tap your final safe spot');
     showDestinationZones();
-    startCast(1500, ()=>die('Too slow'));
+    startCast(TIMING.WAVE2_POP - TIMING.WAVE1_POP, ()=>{});
   }
+
   function showDestinationZones(){
     showMTCandidates();
     destParty.setAttribute('cx',game.targets.party[0]); destParty.setAttribute('cy',game.targets.party[1]);
@@ -377,71 +514,53 @@
     const role = roleSelect.value;
     destLabel.textContent = role==='party'?'Tap PARTY safe spot':role==='t1'?'Tap T1 close bait':'Tap T2 far bait';
   }
+
   function chooseDest(dest){
     if(state!=='move') return;
     const role=roleSelect.value;
     if(dest!==role){ die('Wrong final position'); return; }
-    stopCast(); enableDest(false); placeFinal(); resolveAfterMove();
+    game.moved = true;
+    state='moved';
+    enableDest(false);
+    placeFinal();
+    setStatus('Good. Hold for wave 2.');
   }
-  function resolveAfterMove(){
-    state='resolved';
 
+  function phaseWave2Pop(){
+    if(state==='dead') return;
+    if(!game || !game.moved){ die('Too slow'); return; }
+    state='resolved2';
+    stopCast();
     setStatus('Wave 2 resolves');
-
-    setTimeout(()=>{
-      hideTrines([game.wave2]);
-
-      // Show wave 2 AoEs in a lighter color.
-      clearResolve();
-      [game.wave2].forEach(k=>{
-        TRI[k].forEach(([x,y])=>{
-          const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
-          c.setAttribute('cx',x);
-          c.setAttribute('cy',y);
-          c.setAttribute('r',95);
-          c.style.fill='rgba(170,120,255,0.22)';
-          c.style.stroke='rgba(200,160,255,0.35)';
-          c.style.strokeWidth='2';
-          c.style.pointerEvents='none';
-          resolveG.appendChild(c);
-        });
-      });
-    },450);
-
-    setTimeout(()=>{
-      setStatus('Wave 3 resolves — final safe spots shown');
-      hideTrines(game.wave3);
-
-      // Add wave 3 AoEs in the normal color without clearing wave 2.
-      game.wave3.forEach(k=>{
-        TRI[k].forEach(([x,y])=>{
-          const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
-          c.setAttribute('cx',x);
-          c.setAttribute('cy',y);
-          c.setAttribute('r',95);
-          c.style.fill='rgba(145,30,255,.50)';
-          c.style.stroke='rgba(190,90,255,.80)';
-          c.style.strokeWidth='2';
-          c.style.pointerEvents='none';
-          resolveG.appendChild(c);
-        });
-      });
-
-      showDestinationZones();
-      enableDest(false);
-      [destParty,destT1,destT2].forEach(e=>e.classList.add('correct'));
-    },1250);
-
-    setTimeout(()=>{ successes++; streak++; updateStats(); showOverlay('SUCCESS',true); },2100);
+    hideTrines([game.wave2]);
+    clearResolve();
+    addResolve([game.wave2], 'light');
+    startCast(TIMING.WAVE3_POP - TIMING.WAVE2_POP, ()=>{});
   }
+
+  function phaseWave3Pop(){
+    if(state==='dead') return;
+    if(!game || !game.moved) return;
+    state='resolved3';
+    stopCast();
+    setStatus('Wave 3 resolves — final safe spots shown');
+    hideTrines(game.wave3);
+    // Keep wave 2 light AoEs visible and add wave 3 normal AoEs.
+    addResolve(game.wave3, 'normal');
+    showDestinationZones();
+    enableDest(false);
+    [destParty,destT1,destT2].forEach(e=>e.classList.add('correct'));
+    delay(()=>{ successes++; streak++; updateStats(); showOverlay('SUCCESS',true); }, 800);
+  }
+
   function die(reason){
     if(state==='dead') return;
     const diedState = state;
-    state='dead'; stopCast(); enableWingTap(false); enableDest(false); enableDrag(false); streak=0; updateStats(); setStatus(reason);
+    state='dead'; clearCast(); enableWingTap(false); enableDest(false); enableDrag(false); resetWingGlow(); streak=0; updateStats(); setStatus(reason);
     if(game){
-      if(diedState==='wing') showSafeSideHint();
+      if(diedState==='wing' || diedState==='wave1') showSafeSideHint();
       if(diedState==='drag') showDragHint();
-      if(diedState==='move' || diedState==='resolved'){ showCorrectDestHint(); placeFinal(); }
+      if(diedState==='move' || diedState==='moved' || diedState==='resolved2' || diedState==='resolved3'){ showCorrectDestHint(); placeFinal(); }
     }
     showOverlay('DEAD<br><span style="font-size:22px">'+reason+'<br>Correct spot is shown in green.</span>',false);
   }

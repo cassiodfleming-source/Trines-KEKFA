@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Kefka Trines Trainer - v6 falling timing</title>
+<title>Kefka Trines SIM</title>
 <style>
   :root{ --bg:#090909; --panel:#151515; --text:#f4f4f4; --muted:#aaa; --yellow:rgba(255,230,40,.72); --yellowStroke:rgba(255,252,140,.95); --cyan:rgba(70,235,255,.50); --purple:rgba(205,0,255,.36); --danger:rgba(255,0,70,.42); --good:#28e070; --bad:#ff4b4b; }
   *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -64,6 +64,10 @@
 <body>
 <div id="app">
   <div id="hud">
+    <select id="mechanicSelect" aria-label="Mechanic">
+      <option value="bossdrag">Boss Drag</option>
+      <option value="nobossdrag">No Boss Drag</option>
+    </select>
     <select id="roleSelect" aria-label="Role">
       <option value="party">Party</option>
       <option value="t1">T1 close bait</option>
@@ -72,7 +76,7 @@
     <button id="startBtn" type="button">Start</button>
     <button id="againBtn" type="button">Again</button>
   </div>
-  <div id="status">Choose role and press Start — v6 falling timing</div>
+  <div id="status">Choose mechanic/role and press Start</div>
   <div id="castWrap"><div id="castBar"></div></div>
   <div id="stageWrap">
     <svg id="svg" viewBox="0 0 1320 715" preserveAspectRatio="xMidYMid meet">
@@ -204,6 +208,7 @@
   const status = document.getElementById('status');
   const castBar = document.getElementById('castBar');
   const overlay = document.getElementById('overlay');
+  const mechanicSelect = document.getElementById('mechanicSelect');
   const roleSelect = document.getElementById('roleSelect');
   const tapLeft = document.getElementById('tapLeft');
   const tapRight = document.getElementById('tapRight');
@@ -420,7 +425,7 @@
   }
 
   function resetRound(){
-    clearAllTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); resetWingGlow(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Choose role and press Start');
+    clearAllTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); resetWingGlow(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Choose mechanic/role and press Start');
     [destParty,destT1,destT2,dragBossZone].forEach(e=>{ e.setAttribute('cx',0); e.setAttribute('cy',0); });
   }
 
@@ -468,7 +473,9 @@
     showCleave(game.cleaveSide);
     delay(()=>resetCleave(), 320);
 
-    if(roleSelect.value==='t1'){
+    const bossDragMode = mechanicSelect.value === 'bossdrag';
+
+    if(bossDragMode && roleSelect.value==='t1'){
       state='drag';
       dragBossZone.setAttribute('cx',game.targets.bossAfter[0]);
       dragBossZone.setAttribute('cy',game.targets.bossAfter[1]);
@@ -477,9 +484,13 @@
       startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
     }else{
       game.dragged = true;
-      moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
+      if(bossDragMode){
+        moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
+        setStatus('Boss dragged. First wave pops in 5s.');
+      }else{
+        setStatus('No Boss Drag. First wave pops in 5s.');
+      }
       state='waitingFirstPop';
-      setStatus('Boss dragged. First wave pops in 5s.');
       startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
     }
   }
@@ -495,7 +506,7 @@
 
   function phaseWave1Pop(){
     if(state==='dead') return;
-    if(roleSelect.value==='t1' && !game.dragged){ die('Boss was not dragged'); return; }
+    if(mechanicSelect.value === 'bossdrag' && roleSelect.value==='t1' && !game.dragged){ die('Boss was not dragged'); return; }
     state='move';
     resetCleave(); resetWingGlow();
     hideTrines(game.wave1);

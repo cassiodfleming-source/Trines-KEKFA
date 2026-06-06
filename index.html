@@ -385,19 +385,53 @@
   }
   function resolveAfterMove(){
     state='resolved';
+
     setStatus('Wave 2 resolves');
+
     setTimeout(()=>{
       hideTrines([game.wave2]);
-      setResolve([game.wave2]);
+
+      // Show wave 2 AoEs in a lighter color.
+      clearResolve();
+      [game.wave2].forEach(k=>{
+        TRI[k].forEach(([x,y])=>{
+          const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+          c.setAttribute('cx',x);
+          c.setAttribute('cy',y);
+          c.setAttribute('r',95);
+          c.style.fill='rgba(170,120,255,0.22)';
+          c.style.stroke='rgba(200,160,255,0.35)';
+          c.style.strokeWidth='2';
+          c.style.pointerEvents='none';
+          resolveG.appendChild(c);
+        });
+      });
     },450);
+
     setTimeout(()=>{
       setStatus('Wave 3 resolves — final safe spots shown');
       hideTrines(game.wave3);
-      setResolve(game.wave3);
+
+      // Add wave 3 AoEs in the normal color without clearing wave 2.
+      game.wave3.forEach(k=>{
+        TRI[k].forEach(([x,y])=>{
+          const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+          c.setAttribute('cx',x);
+          c.setAttribute('cy',y);
+          c.setAttribute('r',95);
+          c.style.fill='rgba(145,30,255,.50)';
+          c.style.stroke='rgba(190,90,255,.80)';
+          c.style.strokeWidth='2';
+          c.style.pointerEvents='none';
+          resolveG.appendChild(c);
+        });
+      });
+
       showDestinationZones();
       enableDest(false);
       [destParty,destT1,destT2].forEach(e=>e.classList.add('correct'));
     },1250);
+
     setTimeout(()=>{ successes++; streak++; updateStats(); showOverlay('SUCCESS',true); },2100);
   }
   function die(reason){

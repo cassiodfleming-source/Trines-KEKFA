@@ -317,7 +317,7 @@
   }
   function phaseWing(){
     state='wing'; showTrines([game.wave2]); showCleave(game.cleaveSide); setStatus('Wing + wave 2: tap the safe side'); enableWingTap(true);
-    startCast(6000, ()=>{
+    startCast(1500, ()=>{
       if(state==='wing') die('Too slow');
       else if(state==='drag') die('Boss was not dragged');
       else phaseThird();
@@ -356,7 +356,7 @@
     enableWingTap(false); enableDrag(false);
     showTrines(game.wave3);
     setStatus('Third wave + wing cleave');
-    startCast(6000, phaseWave1Pop);
+    startCast(1500, phaseWave1Pop);
   }
   function phaseWave1Pop(){
     if(state==='dead') return;
@@ -366,7 +366,7 @@
     setResolve(game.wave1);
     setStatus('Wave 1 popped: tap your final safe spot');
     showDestinationZones();
-    startCast(6000, ()=>die('Too slow'));
+    startCast(1500, ()=>die('Too slow'));
   }
   function showDestinationZones(){
     showMTCandidates();

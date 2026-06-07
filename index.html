@@ -64,10 +64,6 @@
 <body>
 <div id="app">
   <div id="hud">
-    <select id="mechanicSelect" aria-label="Mechanic">
-      <option value="bossdrag">Boss Drag</option>
-      <option value="nobossdrag">No Boss Drag</option>
-    </select>
     <select id="roleSelect" aria-label="Role">
       <option value="party">Party</option>
       <option value="t1">T1 close bait</option>
@@ -76,7 +72,7 @@
     <button id="startBtn" type="button">Start</button>
     <button id="againBtn" type="button">Again</button>
   </div>
-  <div id="status">Choose mechanic/role and press Start</div>
+  <div id="status">Kefkabin: choose role and press Start</div>
   <div id="castWrap"><div id="castBar"></div></div>
   <div id="stageWrap">
     <svg id="svg" viewBox="0 0 1320 715" preserveAspectRatio="xMidYMid meet">
@@ -99,6 +95,11 @@
         <rect class="marker" x="803" y="124" width="48" height="48"/><text class="markerText" x="827" y="148">2</text>
         <rect class="marker" x="803" y="533" width="48" height="48"/><text class="markerText" x="827" y="557">3</text>
         <rect class="marker" x="440" y="533" width="48" height="48"/><text class="markerText" x="464" y="557">4</text>
+
+        <rect class="marker" x="626" y="28" width="48" height="48"/><text class="markerText" x="650" y="52">A</text>
+        <rect class="marker" x="936" y="305" width="48" height="48"/><text class="markerText" x="960" y="329">B</text>
+        <rect class="marker" x="626" y="610" width="48" height="48"/><text class="markerText" x="650" y="634">C</text>
+        <rect class="marker" x="316" y="305" width="48" height="48"/><text class="markerText" x="340" y="329">D</text>
       </g>
 
       <g id="trines">
@@ -156,30 +157,46 @@
   };
 
   const OUTER = ['L_NW','L_W','L_SW','R_NE','R_E','R_SE'];
-  const ADJACENT_PAIRS = [
-    ['L_NW','L_W'], ['L_W','L_SW'],
-    ['R_NE','R_E'], ['R_E','R_SE']
-  ];
+
+  // Kefkabin: Wave 1 is ANY 3 random outer trines.
+  // Party priority: first Wave-1 trine clockwise from North.
+  // T2/OT priority: first Wave-1 trine counterclockwise from North.
+  const CW_FROM_NORTH = ['R_NE','R_E','R_SE','L_SW','L_W','L_NW'];
+  const CCW_FROM_NORTH = ['L_NW','L_W','L_SW','R_SE','R_E','R_NE'];
+
+  // Existing calibrated party pockets reused per priority anchor.
+  const PARTY_SPOTS_BY_TRINE = {
+    // Kefkabin party priority spots: first Wave-1 trine clockwise from North.
+    // One calibrated party pocket per possible first-wave outer trine.
+    L_NW:[432,140],
+    L_W:[376,405],
+    L_SW:[585,601],
+    R_NE:[704,52],
+    R_E:[917,247],
+    R_SE:[851,521]
+  };
 
   const PARTY_SPOTS = {
-    L_NW_L_W:[396,278],
-    L_W_L_SW:[479,512],
-    R_NE_R_E:[805,118],
-    R_E_R_SE:[906,337]
+    L_NW_L_W:[585,601],
+    L_W_L_SW:[851,521],
+    R_NE_R_E:[704,52],
+    R_E_R_SE:[917,247],
+    party_extra_NW:[432,140],
+    party_extra_W:[376,405]
   };
   const T1_SPOTS = {
-    t1_top:[748,198],
-    t1_left:[545,335],
-    t1_bottom:[716,468]
+    t1_top:[715,228],
+    t1_left:[533,329],
+    t1_bottom:[706,432]
   };
   const MT_BAIT_SPOTS = Object.values(T1_SPOTS);
   const T2_SPOTS = {
     L_NW:[415,108],
-    L_W:[348,438],
-    L_SW:[561,635],
-    R_NE:[706,15],
-    R_E:[956,239],
-    R_SE:[872,561]
+    L_W:[340,402],
+    L_SW:[564,636],
+    R_NE:[730,14],
+    R_E:[968,258],
+    R_SE:[880,553]
   };
 
   // Main timing model, in milliseconds.
@@ -208,7 +225,6 @@
   const status = document.getElementById('status');
   const castBar = document.getElementById('castBar');
   const overlay = document.getElementById('overlay');
-  const mechanicSelect = document.getElementById('mechanicSelect');
   const roleSelect = document.getElementById('roleSelect');
   const tapLeft = document.getElementById('tapLeft');
   const tapRight = document.getElementById('tapRight');
@@ -403,29 +419,46 @@
     partyIds.forEach((id,i)=>movePlayer(id, pp[0]+(i%3-1)*28, pp[1]+Math.floor(i/3)*28));
   }
 
+  function pickPriority(wave1, order){
+    return order.find(k => wave1.includes(k));
+  }
+
+  function sampleOuterTrines(n){
+    const pool = OUTER.slice();
+    const picked = [];
+    while(picked.length < n){
+      const idx = Math.floor(Math.random() * pool.length);
+      picked.push(pool.splice(idx,1)[0]);
+    }
+    return picked;
+  }
+
   function newGameData(){
-    const pair = rnd(ADJACENT_PAIRS);
-    const extraChoices = OUTER.filter(k=>!pair.includes(k));
-    const extra = rnd(extraChoices);
-    const wave1 = [...pair, extra];
+    // Kefkabin: first wave is any 3 random outer trines; center is excluded.
+    const wave1 = sampleOuterTrines(3);
     const remaining = OUTER.filter(k=>!wave1.includes(k));
     const wave2 = rnd(remaining);
     const wave3 = remaining.filter(k=>k!==wave2).concat(['CENTER']);
+
+    const partyAnchor = pickPriority(wave1, CW_FROM_NORTH);
+    const t2Anchor = pickPriority(wave1, CCW_FROM_NORTH);
+
     const safeSide = Math.random()<0.5 ? 'left' : 'right';
     const cleaveSide = safeSide==='left'?'right':'left';
-    const pc = PARTY_SPOTS[pairKey(pair)].slice();
-    const sc = T2_SPOTS[extra].slice();
+
+    const pc = PARTY_SPOTS_BY_TRINE[partyAnchor].slice();
+    const sc = T2_SPOTS[t2Anchor].slice();
     const center = [650,329];
     const dx = pc[0]-center[0], dy = pc[1]-center[1];
     const len = Math.max(1, Math.hypot(dx,dy));
     const bossAfter = [center[0] + dx/len*92, center[1] + dy/len*92];
     const t1Spot = chooseMTBaitSpot(pc);
     const targets = { party: pc, t1: t1Spot, t2: sc, bossAfter };
-    return {pair, extra, wave1, wave2, wave3, safeSide, cleaveSide, targets, dragged:false, sideChosen:false, moved:false};
+    return {partyAnchor, t2Anchor, wave1, wave2, wave3, safeSide, cleaveSide, targets, dragged:false, sideChosen:false, moved:false};
   }
 
   function resetRound(){
-    clearAllTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); resetWingGlow(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Choose mechanic/role and press Start');
+    clearAllTimers(); state='idle'; game=null; hideOverlay(); hideAllTrines(); clearResolve(); resetCleave(); resetWingGlow(); clearHints(); moveBoss(650,329); resetPlayers(); enableWingTap(false); enableDest(false); enableDrag(false); castBar.style.width='0%'; setStatus('Kefkabin: choose role and press Start');
     [destParty,destT1,destT2,dragBossZone].forEach(e=>{ e.setAttribute('cx',0); e.setAttribute('cy',0); });
   }
 
@@ -466,6 +499,7 @@
     if(state==='dead') return;
     stopCast();
     enableWingTap(false);
+    enableDrag(false);
     resetWingGlow();
 
     if(!game.sideChosen){ die('Too slow'); return; }
@@ -473,40 +507,20 @@
     showCleave(game.cleaveSide);
     delay(()=>resetCleave(), 320);
 
-    const bossDragMode = mechanicSelect.value === 'bossdrag';
-
-    if(bossDragMode && roleSelect.value==='t1'){
-      state='drag';
-      dragBossZone.setAttribute('cx',game.targets.bossAfter[0]);
-      dragBossZone.setAttribute('cy',game.targets.bossAfter[1]);
-      enableDrag(true);
-      setStatus('T1: drag boss before first pop');
-      startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
-    }else{
-      game.dragged = true;
-      if(bossDragMode){
-        moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
-        setStatus('Boss dragged. First wave pops in 5s.');
-      }else{
-        setStatus('No Boss Drag. First wave pops in 5s.');
-      }
-      state='waitingFirstPop';
-      startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
-    }
+    // Kefkabin only: no boss drag mechanic. Boss stays centered.
+    game.dragged = true;
+    state='waitingFirstPop';
+    setStatus('Cleave resolved. First wave pops in 5s.');
+    startCast(TIMING.WAVE1_POP - TIMING.WING_RESOLVE, ()=>{});
   }
 
   function chooseDrag(){
-    if(state!=='drag') return;
-    game.dragged = true;
-    enableDrag(false);
-    moveBoss(game.targets.bossAfter[0], game.targets.bossAfter[1]);
-    state='waitingFirstPop';
-    setStatus('Boss dragged. First wave pops in 5s.');
+    // No boss drag in Kefkabin. Kept as a harmless no-op so older event listeners cannot break the game.
+    return;
   }
 
   function phaseWave1Pop(){
     if(state==='dead') return;
-    if(mechanicSelect.value === 'bossdrag' && roleSelect.value==='t1' && !game.dragged){ die('Boss was not dragged'); return; }
     state='move';
     resetCleave(); resetWingGlow();
     hideTrines(game.wave1);
